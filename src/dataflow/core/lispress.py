@@ -620,3 +620,16 @@ def lispress_to_type_name(e: Lispress) -> TypeName:
         return TypeName(constructor, tuple([lispress_to_type_name(a) for a in args]))
     else:
         raise ValueError(f"unexpected lispress {e}")
+
+from pprint import pprint
+import argparse
+if __name__ == '__main__':
+    args = argparse.ArgumentParser(description='core.lispress')
+
+    args.add_argument('-s', '--string', type=str, help='lispress string input')
+
+    args = args.parse_args()
+
+    # test_string = '(Yield (Event.start (singleton (QueryEventResponse.results (FindEventWrapperWithDefaults (Event.subject_? (?~= \"meeting with the lecture\")))))))'
+    parsed_result = parse_lispress(args.string)
+    pprint(parsed_result)

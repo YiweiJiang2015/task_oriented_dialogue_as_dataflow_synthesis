@@ -29,7 +29,7 @@ A Lispress program is an s-expression: either
 a bare symbol, or
 a whitespace-separated list of s-expressions, surrounded by parentheses. There is a little
 bit of special syntax:
-* Strings surrounded by double-quotes (`"`) are treated parsed as a single are symbol
+* Strings surrounded by double-quotes (`"`) are parsed as a single symbol
   (including the quotes), with standard JSON escaping for strings. For example,
   ```clojure
   (MyFunc "this is a (quoted) string with a \" in it")
@@ -170,3 +170,57 @@ files), and `render_pretty` renders with indentation, which is easier to read.
 `lispress_to_program` and `program_to_lispress` convert to and from a `Program` object,
 which is closer to a computation DAG (rather than an abstract syntax tree), and
 is sometimes more convenient to work with.
+
+> Yiwei
+
+Use the code below to run the parser 
+```shell
+# cd task_oriented_dialogue_as_dataflow_synthesis/src
+python -m dataflow.core.lispress -s "your_string"
+```
+
+
+## Questions
+1. What does "&" mean? (I guess it means `Constraint`)
+
+    In dialogue `11b9b018-5073-4b01-980c-169d29e31721`, turn `3`:
+```text
+Can you search for any plans I have this week with Sam?
+lispress v2:
+(Yield 
+   (FindEventWrapperWithDefaults 
+      (& 
+         (Event.attendees_? 
+            (AttendeeListHasRecipientConstraint 
+               (RecipientWithNameLike 
+                  (^(Recipient) EmptyStructConstraint) 
+                  (PersonName.apply \"Sam\")
+               )
+            )
+         ) 
+         (EventDuringRange 
+            (^(Event) EmptyStructConstraint) 
+            (ThisWeek)
+         )
+      )
+   )
+)
+lispress v1:
+(Yield 
+    :output (FindEventWrapperWithDefaults 
+        :constraint (Constraint[Event] 
+            :attendees (AttendeeListHasRecipientConstraint 
+                :recipientConstraint (RecipientWithNameLike 
+                    :constraint (Constraint[Recipient]) 
+                    :name #(PersonName \"Sam\")
+                )
+            ) 
+            :nonEmptyBase (EventDuringRange 
+                :event (Constraint[Event]) 
+                :range (ThisWeek)
+            )
+        )
+    )
+)
+```
+2. What does "> (size Func.results)" mean? (I guess it prints or stores the computed length of returned result list)
