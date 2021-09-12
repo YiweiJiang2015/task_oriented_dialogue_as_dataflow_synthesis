@@ -624,12 +624,16 @@ def lispress_to_type_name(e: Lispress) -> TypeName:
 from pprint import pprint
 import argparse
 if __name__ == '__main__':
+    default_lispress = r"""
+(^(Event) EmptyStructConstraint)
+          """
     args = argparse.ArgumentParser(description='core.lispress')
 
-    args.add_argument('-s', '--string', type=str, help='lispress string input')
+    args.add_argument('-s', '--string', type=str, default=default_lispress, help='lispress string input')
 
     args = args.parse_args()
 
     # test_string = '(Yield (Event.start (singleton (QueryEventResponse.results (FindEventWrapperWithDefaults (Event.subject_? (?~= \"meeting with the lecture\")))))))'
     parsed_result = parse_lispress(args.string)
+    prog, _ = lispress_to_program(parsed_result, idx=0)
     pprint(parsed_result)

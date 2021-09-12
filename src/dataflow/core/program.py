@@ -51,8 +51,8 @@ class TypeName:
 class Expression:
     id: str
     op: Op
-    type_args: Optional[List[TypeName]] = None
-    type: Optional[TypeName] = None
+    type_args: Optional[List[TypeName]] = None  # todo types of args?
+    type: Optional[TypeName] = None  # todo type of output?
     arg_ids: List[str] = field(default_factory=list)
 
 
