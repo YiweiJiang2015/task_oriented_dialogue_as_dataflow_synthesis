@@ -1,15 +1,5 @@
 from enum import Enum
 from typing import Union, List
-from dataflow.core.program import (
-    BuildStructOp,
-    CallLikeOp,
-    Expression,
-    Op,
-    Program,
-    TypeName,
-    ValueOp,
-    roots_and_reentrancies,
-)
 from dataflow.core.lispress import (
     META_CHAR,
     VALUE_CHAR,
@@ -45,11 +35,25 @@ class Node:
         for edge in self.edges:
             edge.walk(visitor)
 
-    def to_nested_dict(self):
-        return
+    def to_nested_dict(self) -> dict:
+        """
+        Comform to the jstree data format.
+        https://www.jstree.com/docs/json/
+        """
+        nested_dict = {
+            "text": ' '.join(self.node_head) if self.head_is_list else self.node_head,
+            'icon': False,
+            'state': {'opened': True, 'selected': False},
+            'children': [edge.pop_end_point_to_nested_dict() for edge in self.edges]
+        }
+        return nested_dict
 
     def __str__(self):
         return f'Node_head: {self.node_head}, {self.num_children} children'
+
+    @property
+    def head_is_list(self):
+        return isinstance(self.node_head, list)
 
     @property
     def num_children(self):
@@ -57,8 +61,7 @@ class Node:
 
 class Edge:
 
-    def __init__(self, edge_start_point, edge_end_point):
-        # self.label = edge_label
+    def __init__(self, edge_start_point: Node, edge_end_point: Node):
         self.start_point = edge_start_point
         self.end_point = edge_end_point
 
@@ -69,6 +72,9 @@ class Edge:
     def walk(self, visitor):
         visitor.edge(self)
         self.end_point.walk(visitor)
+
+    def pop_end_point_to_nested_dict(self):
+        return self.end_point.to_nested_dict()
 
     def __str__(self):
         return f'Start [{self.start_point}]; End [{self.end_point}]'
@@ -120,7 +126,7 @@ class SexpParser:
         return self.buffer.find_node_head()
 
 
-class ParseError(Exception):
+class SexpParseError(Exception):
     pass
 
 
@@ -155,6 +161,8 @@ class MyBuffer:
     def find_meta_span(self):
         meta_span = ""
         c = self.text[self.pos]
+        if c != LEFT_PAREN:
+            raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
         self.accept(LEFT_PAREN)
         meta_span += self.find_node_head()
         self.accept(RIGHT_PAREN)
@@ -177,7 +185,7 @@ class MyBuffer:
             self.accept(META)
             meta = self.find_meta_span()
             expr = self.find_consecutive_span()
-            return [META, meta, expr]
+            return [META+meta, expr]
         else:
             out_inner = ""
             # if c != "\\":
@@ -205,7 +213,11 @@ class MyBuffer:
         while self.skip_then_peek() != RIGHT_PAREN:
             if self.skip_then_peek() == LEFT_PAREN:
                 break
-            out_head.append(self.find_consecutive_span())
+            found_span = self.find_consecutive_span()
+            if isinstance(found_span, list):
+                out_head.extend(found_span)
+            else:
+                out_head.append(found_span)
         return out_head[0] if len(out_head) == 1 else out_head
 
     def accept(self, string):
@@ -216,13 +228,13 @@ class MyBuffer:
             self.pos += len(string)
             return
         else:
-            raise ParseError(f"failed to accept '{string}' in '{ self.text[:self.pos]}*{self.text[self.pos:]}'")
+            raise SexpParseError(f"failed to accept '{string}' in '{ self.text[:self.pos]}*{self.text[self.pos:]}'")
 
     def end_of_stream(self):
         self.skip_whitespace()
 
         if self.pos < self.length:
-            raise ParseError("invalid end '^{}'".format(self.text[self.pos:]))
+            raise SexpParseError("invalid end '^{}'".format(self.text[self.pos:]))
 
     def __str__(self):
         return f"Buffer state--length: {self.length}, pos: {self.pos}, caret: {self.text[self.pos]}"
@@ -239,21 +251,22 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-(Yield
-  (Execute
-    (ReviseConstraint
-      (refer (^(Dynamic) roleConstraint (Path.apply "output")))
-      (UpdateEventIntensionConstraint)
-      (Event.attendees_?
-        (AttendeeListHasRecipient
-          (Execute
-            (refer
-              (extensionConstraint
-                (RecipientWithNameLike
-                  (^(Recipient) EmptyStructConstraint)
-                  (PersonName.apply "lori"))))))))))
+(let
+  (x0
+    (Execute
+      (refer
+        (extensionConstraint (^(Event) EmptyStructConstraint)))))
+  (Yield
+    (UpdateCommitEventWrapper
+      (UpdatePreflightEventWrapper
+        (Event.id x0)
+        (Event.start_?
+          (DateTime.date_?
+            (?=
+              (nextDayOfWeek (DateTime.date (Event.start x0)) (Thursday)))))))))
     """
     parser = SexpParser(test_string)
     node = parser.parse()
+    nested_dict = node.to_nested_dict()
     print()
     print(node)
