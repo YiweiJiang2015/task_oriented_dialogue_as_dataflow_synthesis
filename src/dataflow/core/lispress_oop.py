@@ -105,17 +105,23 @@ class SexpParser:
 
     def parse_node(self):
         node_head = None
-        self.buffer.accept(LEFT_PAREN)
-        ch = self.buffer.peek()
-        if ch != LEFT_PAREN and ch != RIGHT_PAREN:
+        state = None
+        if self.buffer.skip_then_peek() == LEFT_PAREN:
+            self.buffer.accept(LEFT_PAREN)
+            state = "PAREN_INIT"
+        else:
+            pass # todo
+
+        if self.buffer.peek() != LEFT_PAREN and self.buffer.peek() != RIGHT_PAREN:
             node_head = self.find_node_head()
 
         node = Node(node_head)
         # accept edges
-        while self.buffer.skip_then_peek() == LEFT_PAREN:
+        while self.buffer.skip_then_peek() == LEFT_PAREN or self.buffer.skip_then_peek().isnumeric():
             node.add_edge(self.parse_edge(node))
         # end of node
-        self.buffer.accept(RIGHT_PAREN)
+        if state == "PAREN_INIT":
+            self.buffer.accept(RIGHT_PAREN)
         return node
 
     def parse_edge(self, edge_start_point):
@@ -137,10 +143,10 @@ class MyBuffer:
         self.pos = 0
         self.length = len(self.text)
 
-    def is_eoi(self):
+    def is_eoi(self) -> bool:
         return self.pos == self.length
 
-    def peek(self):
+    def peek(self) -> str:
         'Read ahead of the character of current position from self.text'
         return self.text[self.pos]
 
@@ -154,7 +160,7 @@ class MyBuffer:
         while (not self.is_eoi()) and self.peek().isspace():
             self.next_char()
 
-    def skip_then_peek(self):
+    def skip_then_peek(self) -> str:
         self.skip_whitespace()
         return self.peek()
 
@@ -251,19 +257,11 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-(let
-  (x0
-    (Execute
-      (refer
-        (extensionConstraint (^(Event) EmptyStructConstraint)))))
-  (Yield
-    (UpdateCommitEventWrapper
-      (UpdatePreflightEventWrapper
-        (Event.id x0)
-        (Event.start_?
-          (DateTime.date_?
-            (?=
-              (nextDayOfWeek (DateTime.date (Event.start x0)) (Thursday)))))))))
+(Yield
+  (Event.start
+    (FindNumNextEvent
+      (Event.subject_? (?~= "staff meeting"))
+      1L)))
     """
     parser = SexpParser(test_string)
     node = parser.parse()
