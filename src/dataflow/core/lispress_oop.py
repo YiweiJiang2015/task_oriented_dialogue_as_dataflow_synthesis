@@ -1,11 +1,6 @@
 from enum import Enum
 from typing import Union, List
-from dataflow.core.lispress import (
-    META_CHAR,
-    VALUE_CHAR,
-    # lispress_to_type_name,
-    # parse_lispress,
-)
+
 LEFT_PAREN = "("
 RIGHT_PAREN = ")"
 ESCAPE = "\\"
@@ -13,7 +8,12 @@ DOUBLE_QUOTE = '"'
 META = "^"
 READER = "#"
 
+# borrowed from lispress.py
+# named args are given like `(fn :name1 arg1 :name2 arg2 ...)`
 NAMED_ARG_PREFIX = ":"
+# variables will be named `x0`, `x1`, etc., in the order they are introduced.
+VAR_PREFIX = "x"
+
 
 class NodeType:
     pass
@@ -61,8 +61,8 @@ class Node:
     def num_children(self):
         return len(self.edges)
 
-class Edge:
 
+class Edge:
     def __init__(self, edge_start_point: Node, edge_end_point: Node):
         self.start_point = edge_start_point
         self.end_point = edge_end_point
@@ -115,6 +115,8 @@ class SexpParser:
             state = "READER_INIT"
         elif self.buffer.skip_then_peek() == NAMED_ARG_PREFIX:
             state = "NAMED_ARG_PREFIX_INIT"
+        elif self.buffer.skip_then_peek() == VAR_PREFIX:
+            state = "VAR_PREFIX_INIT"
         else:
             pass
 
@@ -124,7 +126,7 @@ class SexpParser:
         node = Node(node_head)
         # accept edges
         c = self.buffer.skip_then_peek()
-        while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX:
+        while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX or c == VAR_PREFIX:
             node.add_edge(self.parse_edge(node))
             if state == 'READER_INIT':
                 c = self.buffer.peek()
@@ -298,10 +300,11 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-(Yield
-  :output (PlaceHasFeature
-    :feature #(PlaceFeature "FullBar")
-    :place (singleton)))
+ (FindEventWrapperWithDefaults
+            :constraint (EventOnDateAfterTime
+              :date (:date x0)
+              :event (Constraint[Event])
+              :time (:time x0)))
     """
     parser = SexpParser(test_string)
     node = parser.parse()
