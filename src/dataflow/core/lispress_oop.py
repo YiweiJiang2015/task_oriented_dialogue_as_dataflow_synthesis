@@ -13,6 +13,8 @@ DOUBLE_QUOTE = '"'
 META = "^"
 READER = "#"
 
+NAMED_ARG_PREFIX = ":"
+
 class NodeType:
     pass
 
@@ -111,23 +113,27 @@ class SexpParser:
             state = "PAREN_INIT"
         elif self.buffer.skip_then_peek() == READER:
             state = "READER_INIT"
+        elif self.buffer.skip_then_peek() == NAMED_ARG_PREFIX:
+            state = "NAMED_ARG_PREFIX_INIT"
         else:
             pass
 
-        if self.buffer.peek() != LEFT_PAREN and self.buffer.peek() != RIGHT_PAREN: # and self.buffer.peek() != READER:
-            node_head = self.find_node_head()
+        if self.buffer.peek() != LEFT_PAREN and self.buffer.peek() != RIGHT_PAREN:
+            node_head = self.parse_node_head()
 
         node = Node(node_head)
         # accept edges
         c = self.buffer.skip_then_peek()
-        while c == LEFT_PAREN or c.isnumeric() or c == READER:
+        while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX:
             node.add_edge(self.parse_edge(node))
             if state == 'READER_INIT':
                 c = self.buffer.peek()
+            elif state == 'NAMED_ARG_PREFIX_INIT':  # named arg node only accepts one child
+                break
             else:
-                c = self.buffer.skip_then_peek()  #peek()
+                c = self.buffer.skip_then_peek()
         # end of node
-        if state == "PAREN_INIT": #or state == "READER_INIT":
+        if state == "PAREN_INIT":
             self.buffer.accept(RIGHT_PAREN)
         return node
 
@@ -135,7 +141,7 @@ class SexpParser:
         edge_end_point = self.parse_node()
         return Edge(edge_start_point, edge_end_point)
 
-    def find_node_head(self):
+    def parse_node_head(self):
         return self.buffer.find_node_head()
 
 
@@ -212,9 +218,9 @@ class MyBuffer:
             meta = self.find_meta_span()
             expr = self.find_consecutive_span()
             return [META+meta, expr]
-        elif c == READER:
-            self.accept(READER)
-            return READER #[READER, self.find_reader_span()]
+        # elif c == READER:
+        #     self.accept(READER)
+        #     return READER #[READER, self.find_reader_span()]
         else:
             out_inner = ""
             # if c != "\\":
@@ -239,10 +245,19 @@ class MyBuffer:
 
     def find_node_head(self):
         out_head = []
+        if self.skip_then_peek() == READER:
+            self.accept(READER)
+            return READER
+        if self.skip_then_peek() == NAMED_ARG_PREFIX:
+            self.accept(NAMED_ARG_PREFIX)
+            return NAMED_ARG_PREFIX + self.find_consecutive_span()
         while self.skip_then_peek() != RIGHT_PAREN:
             if self.skip_then_peek() == LEFT_PAREN:
                 break
+            if self.skip_then_peek() == NAMED_ARG_PREFIX:
+                break
             if self.skip_then_peek() == READER:
+                # out_head.append(READER)
                 break
             found_span = self.find_consecutive_span()
             if isinstance(found_span, list):
@@ -278,6 +293,7 @@ def _is_beginning_control_char(nextC):
         or nextC == DOUBLE_QUOTE
         or nextC == READER
         or nextC == META
+        or nextC == NAMED_ARG_PREFIX
     )
 
 if __name__ == "__main__":
@@ -285,10 +301,7 @@ if __name__ == "__main__":
 (Yield
   :output (PlaceHasFeature
     :feature #(PlaceFeature "FullBar")
-    :place (singleton
-      (:results
-        (FindPlaceMultiResults
-          :place #(LocationKeyphrase "R House"))))))
+    :place (singleton)))
     """
     parser = SexpParser(test_string)
     node = parser.parse()
