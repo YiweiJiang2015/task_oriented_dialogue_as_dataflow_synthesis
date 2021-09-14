@@ -114,15 +114,18 @@ class SexpParser:
         else:
             pass
 
-        if self.buffer.peek() != LEFT_PAREN and self.buffer.peek() != RIGHT_PAREN:
+        if self.buffer.peek() != LEFT_PAREN and self.buffer.peek() != RIGHT_PAREN: # and self.buffer.peek() != READER:
             node_head = self.find_node_head()
 
         node = Node(node_head)
         # accept edges
         c = self.buffer.skip_then_peek()
-        while c == LEFT_PAREN or c.isnumeric():
+        while c == LEFT_PAREN or c.isnumeric() or c == READER:
             node.add_edge(self.parse_edge(node))
-            c = self.buffer.peek()
+            if state == 'READER_INIT':
+                c = self.buffer.peek()
+            else:
+                c = self.buffer.skip_then_peek()  #peek()
         # end of node
         if state == "PAREN_INIT": #or state == "READER_INIT":
             self.buffer.accept(RIGHT_PAREN)
@@ -239,6 +242,8 @@ class MyBuffer:
         while self.skip_then_peek() != RIGHT_PAREN:
             if self.skip_then_peek() == LEFT_PAREN:
                 break
+            if self.skip_then_peek() == READER:
+                break
             found_span = self.find_consecutive_span()
             if isinstance(found_span, list):
                 out_head.extend(found_span)
@@ -277,7 +282,13 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-#(Number 4)
+(Yield
+  :output (PlaceHasFeature
+    :feature #(PlaceFeature "FullBar")
+    :place (singleton
+      (:results
+        (FindPlaceMultiResults
+          :place #(LocationKeyphrase "R House"))))))
     """
     parser = SexpParser(test_string)
     node = parser.parse()
