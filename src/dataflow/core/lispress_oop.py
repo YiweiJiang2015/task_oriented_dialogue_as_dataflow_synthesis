@@ -39,7 +39,7 @@ class Node:
 
     def to_nested_dict(self) -> dict:
         """
-        Comform to the jstree data format.
+        Conform to the jstree data format.
         https://www.jstree.com/docs/json/
         """
         nested_dict = {
@@ -101,6 +101,7 @@ class SexpParser:
         self.buffer = MyBuffer(text)
 
     def parse(self):
+        print('Parsing starts')
         node = self.parse_node()
         self.buffer.end_of_stream()
         return node
@@ -113,6 +114,8 @@ class SexpParser:
             state = "PAREN_INIT"
         elif self.buffer.skip_then_peek() == READER:
             state = "READER_INIT"
+        elif self.buffer.skip_then_peek() == META:
+            state = "META_INIT"
         elif self.buffer.skip_then_peek() == NAMED_ARG_PREFIX:
             state = "NAMED_ARG_PREFIX_INIT"
         elif self.buffer.skip_then_peek() == VAR_PREFIX:
@@ -126,9 +129,9 @@ class SexpParser:
         node = Node(node_head)
         # accept edges
         c = self.buffer.skip_then_peek()
-        while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX or c == VAR_PREFIX:
+        while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX or c == VAR_PREFIX or c == META:
             node.add_edge(self.parse_edge(node))
-            if state == 'READER_INIT':
+            if state == 'READER_INIT' or state == 'META_INIT':
                 c = self.buffer.peek()
             elif state == 'NAMED_ARG_PREFIX_INIT':  # named arg node only accepts one child
                 break
@@ -145,6 +148,9 @@ class SexpParser:
 
     def parse_node_head(self):
         return self.buffer.find_node_head()
+
+    def __str__(self):
+        return f'Parser buffer state-{str(self.buffer)}'
 
 
 class SexpParseError(Exception):
@@ -181,13 +187,23 @@ class MyBuffer:
 
     def find_meta_span(self):
         meta_span = ""
-        # c = self.text[self.pos]
-        if self.peek() != LEFT_PAREN:
-            raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
-        self.accept(LEFT_PAREN)
-        meta_span += self.find_node_head()
-        self.accept(RIGHT_PAREN)
-        return f"({meta_span})"
+        meta_state = None  # 0: meta followed by LEFT_PAREN, 1: meta followed by RIGHT_PAREN
+        if self.peek() == LEFT_PAREN:
+            meta_state = 0
+            self.accept(LEFT_PAREN)
+            meta_span += self.find_node_head()
+            self.accept(RIGHT_PAREN)
+            return f"({meta_span})"
+        else:
+            meta_state = 1
+            meta_span += self.find_node_head()
+        return f"({meta_span})" if meta_state == 0 else meta_span
+        # if self.peek() != LEFT_PAREN:
+        #     raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
+        # self.accept(LEFT_PAREN)
+        # meta_span += self.find_node_head()
+        # self.accept(RIGHT_PAREN)
+        # return f"({meta_span})"
 
     def find_reader_span(self):
         """
@@ -217,9 +233,12 @@ class MyBuffer:
             return f'"{out_str}"'
         elif c == META:
             self.accept(META)
-            meta = self.find_meta_span()
-            expr = self.find_consecutive_span()
-            return [META+meta, expr]
+            if self.peek() == LEFT_PAREN:
+                meta = self.find_meta_span()
+                expr = self.find_consecutive_span()
+                return [META+meta, expr]
+            else:
+                return META+self.find_meta_span()
         # elif c == READER:
         #     self.accept(READER)
         #     return READER #[READER, self.find_reader_span()]
@@ -230,7 +249,7 @@ class MyBuffer:
 
             # TODO: is there a better loop idiom here?
             if not self.is_eoi():
-                next_c = self.peek()
+                next_c = self.skip_then_peek() # peek
                 escaped = c == "\\"
                 while (not self.is_eoi()) and (
                         escaped or not _is_beginning_control_char(next_c)
@@ -300,12 +319,10 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
- (FindEventWrapperWithDefaults
-            :constraint (EventOnDateAfterTime
-              :date (:date x0)
-              :event (Constraint[Event])
-              :time (:time x0)))
-    """
+^Unit
+(^(DayOfWeek) Yield
+  :output ^DayOfWeek (Date.dayOfWeek :date ^Date (Tomorrow)))
+    """ #^Unit (^(Date) Yield :output ^Date (Tomorrow))
     parser = SexpParser(test_string)
     node = parser.parse()
     nested_dict = node.to_nested_dict()

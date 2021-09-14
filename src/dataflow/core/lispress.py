@@ -625,11 +625,7 @@ from pprint import pprint
 import argparse
 if __name__ == '__main__':
     default_lispress = r"""
- (FindEventWrapperWithDefaults
-            :constraint (EventOnDateAfterTime
-              :date (:date x0)
-              :event (Constraint[Event])
-              :time (:time x0)))
+^Unit (^(Date) Yield :output ^Date (Tomorrow))
     """
     args = argparse.ArgumentParser(description='core.lispress')
 
