@@ -101,7 +101,6 @@ class SexpParser:
         self.buffer = MyBuffer(text)
 
     def parse(self):
-        print('Parsing starts')
         node = self.parse_node()
         self.buffer.end_of_stream()
         return node
@@ -131,6 +130,8 @@ class SexpParser:
         c = self.buffer.skip_then_peek()
         while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX or c == VAR_PREFIX or c == META:
             node.add_edge(self.parse_edge(node))
+            if self.buffer.is_eoi():
+                break
             if state == 'READER_INIT' or state == 'META_INIT':
                 c = self.buffer.peek()
             elif state == 'NAMED_ARG_PREFIX_INIT':  # named arg node only accepts one child
@@ -185,18 +186,33 @@ class MyBuffer:
         self.skip_whitespace()
         return self.peek()
 
+    def find_meta_node_head(self) -> str:
+        meta_node_head = self.find_node_head()
+        if isinstance(meta_node_head, list):
+            return ' '.join(meta_node_head)
+        elif isinstance(meta_node_head, str):  # str
+            return meta_node_head
+        else:
+            raise SexpParseError(f"Wrong characters after `^` in '{self.text[:self.pos]}*{self.text[self.pos:]}")
+
     def find_meta_span(self):
         meta_span = ""
         meta_state = None  # 0: meta followed by LEFT_PAREN, 1: meta followed by RIGHT_PAREN
         if self.peek() == LEFT_PAREN:
             meta_state = 0
             self.accept(LEFT_PAREN)
-            meta_span += self.find_node_head()
+            meta_span += self.find_meta_node_head()  # todo I really want to avoid this func
+            # meta_node_head = self.find_node_head()
+            # if isinstance(meta_node_head, list):
+            #     meta_span += ' '.join(meta_node_head)
+            # elif isinstance(meta_node_head, str): # str
+            #     meta_span += meta_node_head
+            # else:
+            #     raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
             self.accept(RIGHT_PAREN)
-            return f"({meta_span})"
         else:
             meta_state = 1
-            meta_span += self.find_node_head()
+            meta_span += self.find_meta_node_head()  # I really want to avoid this func
         return f"({meta_span})" if meta_state == 0 else meta_span
         # if self.peek() != LEFT_PAREN:
         #     raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
@@ -320,9 +336,18 @@ def _is_beginning_control_char(nextC):
 if __name__ == "__main__":
     test_string = r"""
 ^Unit
-(^(DayOfWeek) Yield
-  :output ^DayOfWeek (Date.dayOfWeek :date ^Date (Tomorrow)))
-    """ #^Unit (^(Date) Yield :output ^Date (Tomorrow))
+(^(Boolean) Yield
+  :output ^Boolean
+  (PlaceHasFeature
+    :feature ^PlaceFeature (PlaceFeature.FullBar)
+    :place ^Place
+    (^(Place) singleton
+      :list ^(List Place)
+      (PlaceSearchResponse.results
+        :obj ^PlaceSearchResponse
+        (FindPlaceMultiResults
+          :place ^LocationKeyphrase
+          (LocationKeyphrase.apply :inner ^String "R House"))))))""" #^Unit (^(Date) Yield :output ^Date (Tomorrow))
     parser = SexpParser(test_string)
     node = parser.parse()
     nested_dict = node.to_nested_dict()
