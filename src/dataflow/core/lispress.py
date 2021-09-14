@@ -624,9 +624,7 @@ def lispress_to_type_name(e: Lispress) -> TypeName:
 from pprint import pprint
 import argparse
 if __name__ == '__main__':
-    default_lispress = r"""
-(^(Event) EmptyStructConstraint)
-          """
+    default_lispress = r"""(Constraint[Event] :subject (?~= #(String "game")))"""
     args = argparse.ArgumentParser(description='core.lispress')
 
     args.add_argument('-s', '--string', type=str, default=default_lispress, help='lispress string input')

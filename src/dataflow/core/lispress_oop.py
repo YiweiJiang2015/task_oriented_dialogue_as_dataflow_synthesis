@@ -109,18 +109,22 @@ class SexpParser:
         if self.buffer.skip_then_peek() == LEFT_PAREN:
             self.buffer.accept(LEFT_PAREN)
             state = "PAREN_INIT"
+        elif self.buffer.skip_then_peek() == READER:
+            state = "READER_INIT"
         else:
-            pass # todo
+            pass
 
         if self.buffer.peek() != LEFT_PAREN and self.buffer.peek() != RIGHT_PAREN:
             node_head = self.find_node_head()
 
         node = Node(node_head)
         # accept edges
-        while self.buffer.skip_then_peek() == LEFT_PAREN or self.buffer.skip_then_peek().isnumeric():
+        c = self.buffer.skip_then_peek()
+        while c == LEFT_PAREN or c.isnumeric():
             node.add_edge(self.parse_edge(node))
+            c = self.buffer.peek()
         # end of node
-        if state == "PAREN_INIT":
+        if state == "PAREN_INIT": #or state == "READER_INIT":
             self.buffer.accept(RIGHT_PAREN)
         return node
 
@@ -166,13 +170,26 @@ class MyBuffer:
 
     def find_meta_span(self):
         meta_span = ""
-        c = self.text[self.pos]
-        if c != LEFT_PAREN:
+        # c = self.text[self.pos]
+        if self.peek() != LEFT_PAREN:
             raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
         self.accept(LEFT_PAREN)
         meta_span += self.find_node_head()
         self.accept(RIGHT_PAREN)
         return f"({meta_span})"
+
+    def find_reader_span(self):
+        """
+        Node after # is like (Number 3)
+        """
+        if self.peek() != LEFT_PAREN:
+            raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
+        self.accept(LEFT_PAREN)
+        reader_span = ' '.join(self.find_node_head())
+        if self.peek() != RIGHT_PAREN:
+            raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
+        # self.accept(RIGHT_PAREN)
+        return reader_span
 
     def find_consecutive_span(self):
         """"""
@@ -192,6 +209,9 @@ class MyBuffer:
             meta = self.find_meta_span()
             expr = self.find_consecutive_span()
             return [META+meta, expr]
+        elif c == READER:
+            self.accept(READER)
+            return READER #[READER, self.find_reader_span()]
         else:
             out_inner = ""
             # if c != "\\":
@@ -257,11 +277,7 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-(Yield
-  (Event.start
-    (FindNumNextEvent
-      (Event.subject_? (?~= "staff meeting"))
-      1L)))
+#(Number 4)
     """
     parser = SexpParser(test_string)
     node = parser.parse()
