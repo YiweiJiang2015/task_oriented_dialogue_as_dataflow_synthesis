@@ -625,7 +625,10 @@ from pprint import pprint
 import argparse
 if __name__ == '__main__':
     default_lispress = r"""
-^Unit (^(Date) Yield :output ^Date (Tomorrow))
+(^(Event) refer
+          :constraint ^(Constraint (CalflowIntension Event))
+            (^(Event) extensionConstraint
+            :constraint ^(Constraint Event) (^(Event) EmptyStructConstraint)))
     """
     args = argparse.ArgumentParser(description='core.lispress')
 

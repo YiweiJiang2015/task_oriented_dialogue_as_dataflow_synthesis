@@ -81,8 +81,10 @@ class Edge:
     def __str__(self):
         return f'Start [{self.start_point}]; End [{self.end_point}]'
 
+
 class Visitor:
     'Interface'
+
     def node(self, node):
         return
 
@@ -97,10 +99,11 @@ class SexpParser:
     """
     A bottom-up parser.
     """
+
     def __init__(self, text):
         self.buffer = MyBuffer(text)
 
-    def parse(self):
+    def parse(self) -> Node:
         node = self.parse_node()
         self.buffer.end_of_stream()
         return node
@@ -127,15 +130,18 @@ class SexpParser:
 
         node = Node(node_head)
         # accept edges
-        c = self.buffer.skip_then_peek()
+        c = self.buffer.skip_then_peek() # Storing the peeked letter into a variable will make the loop condition cleaner and more efficient.
         while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX or c == VAR_PREFIX or c == META:
             node.add_edge(self.parse_edge(node))
             if self.buffer.is_eoi():
+                # If a string ends with `#(PlaceFeature "FullBar")` or `??` todo I don't recall any other situations now,
+                # the buffer will exhaust the last RIGHT_PAREN and eventually points to End_of_String.
+                # Thus, we need to jump out of the loop. Otherwise, it will cause IndexError within buffer.
                 break
-            if state == 'READER_INIT' or state == 'META_INIT':
-                c = self.buffer.peek()
-            elif state == 'NAMED_ARG_PREFIX_INIT':  # named arg node only accepts one child
+            if state == 'READER_INIT' or state == 'META_INIT' or state == 'NAMED_ARG_PREFIX_INIT':
+                # Operators (i.e., `^`, `#`, `:`) only accept one child
                 break
+                # c = self.buffer.skip_then_peek()
             else:
                 c = self.buffer.skip_then_peek()
         # end of node
@@ -169,7 +175,7 @@ class MyBuffer:
         return self.pos == self.length
 
     def peek(self) -> str:
-        'Read ahead of the character of current position from self.text'
+        """Read ahead of the character of current position from self.text"""
         return self.text[self.pos]
 
     def next_char(self):
@@ -196,68 +202,58 @@ class MyBuffer:
             raise SexpParseError(f"Wrong characters after `^` in '{self.text[:self.pos]}*{self.text[self.pos:]}")
 
     def find_meta_span(self):
+        """
+        Find the text spans after `^`. There are 3 varieties found in current data:
+        - Single word: ^(Date), ^Date, ^Recipient
+        - Consecutive words: ^(Constraint Event), ^(CalflowIntension Event)
+        - Nested: ^(Constraint (List Attendee), ^(Constraint (CalflowIntension Event)), ^(Constraint (CalflowIntension Recipient)
+        """
         meta_span = ""
-        meta_state = None  # 0: meta followed by LEFT_PAREN, 1: meta followed by RIGHT_PAREN
+        meta_state = None  # 0: meta followed by LEFT_PAREN, 1: meta followed directly by letters
         if self.peek() == LEFT_PAREN:
             meta_state = 0
             self.accept(LEFT_PAREN)
             meta_span += self.find_meta_node_head()  # todo I really want to avoid this func
-            # meta_node_head = self.find_node_head()
-            # if isinstance(meta_node_head, list):
-            #     meta_span += ' '.join(meta_node_head)
-            # elif isinstance(meta_node_head, str): # str
-            #     meta_span += meta_node_head
-            # else:
-            #     raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
+            while self.peek() == LEFT_PAREN:
+                meta_span += (' ' + self.find_meta_span()) # handles nested meta spans like ^(Constraint (CalflowIntension Event))
             self.accept(RIGHT_PAREN)
         else:
             meta_state = 1
             meta_span += self.find_meta_node_head()  # I really want to avoid this func
         return f"({meta_span})" if meta_state == 0 else meta_span
-        # if self.peek() != LEFT_PAREN:
-        #     raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
-        # self.accept(LEFT_PAREN)
-        # meta_span += self.find_node_head()
-        # self.accept(RIGHT_PAREN)
-        # return f"({meta_span})"
 
     def find_reader_span(self):
-        """
-        Node after # is like (Number 3)
-        """
+        """ Find the text span after `#` like `(Number 3)` or `(String "meeting with the lecture")` """
         if self.peek() != LEFT_PAREN:
-            raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
+            raise SexpParseError(f"Wrong characters after `^` in '{self.text[:self.pos]}*{self.text[self.pos:]}")
         self.accept(LEFT_PAREN)
         reader_span = ' '.join(self.find_node_head())
         if self.peek() != RIGHT_PAREN:
-            raise SexpParseError(f"Wrong characters after `^` in '{ self.text[:self.pos]}*{self.text[self.pos:]}")
-        # self.accept(RIGHT_PAREN)
+            raise SexpParseError(f"Wrong characters after `^` in '{self.text[:self.pos]}*{self.text[self.pos:]}")
+
         return reader_span
 
     def find_consecutive_span(self):
-        """"""
+        """This func is mainly borrowed from dataflow.core.sexp.py-read_list()"""
         c = self.text[self.pos]
         if c == DOUBLE_QUOTE:
             self.accept(DOUBLE_QUOTE)
             out_str = ""
-            while self.peek() != '"':
+            while self.peek() != DOUBLE_QUOTE:
                 c_string = self.next_char()
                 out_str += c_string
-                if c_string == "\\":
+                if c_string == ESCAPE:
                     out_str += self.next_char()
             self.next_char()
             return f'"{out_str}"'
         elif c == META:
             self.accept(META)
             if self.peek() == LEFT_PAREN:
-                meta = self.find_meta_span()
-                expr = self.find_consecutive_span()
-                return [META+meta, expr]
+                meta_span = self.find_meta_span() # see notes below this func
+                expr_span = self.find_consecutive_span() #
+                return [META + meta_span, expr_span]
             else:
-                return META+self.find_meta_span()
-        # elif c == READER:
-        #     self.accept(READER)
-        #     return READER #[READER, self.find_reader_span()]
+                return META + self.find_meta_span()
         else:
             out_inner = ""
             # if c != "\\":
@@ -265,12 +261,12 @@ class MyBuffer:
 
             # TODO: is there a better loop idiom here?
             if not self.is_eoi():
-                next_c = self.skip_then_peek() # peek
-                escaped = c == "\\"
+                next_c = self.skip_then_peek()  # peek
+                escaped = c == ESCAPE
                 while (not self.is_eoi()) and (
                         escaped or not _is_beginning_control_char(next_c)
                 ):
-                    if (not escaped) and next_c == "\\":
+                    if (not escaped) and next_c == ESCAPE:
                         self.next_char()
                         escaped = True
                     else:
@@ -294,7 +290,6 @@ class MyBuffer:
             if self.skip_then_peek() == NAMED_ARG_PREFIX:
                 break
             if self.skip_then_peek() == READER:
-                # out_head.append(READER)
                 break
             found_span = self.find_consecutive_span()
             if isinstance(found_span, list):
@@ -304,16 +299,18 @@ class MyBuffer:
         return out_head[0] if len(out_head) == 1 else out_head
 
     def accept(self, string):
-        'Check if the string passed in matches indexed raw text'
-        self.skip_whitespace() # self.pos ++ if current pos points to a whitespace.
+        """Check if the string passed in matches indexed raw text"""
+        self.skip_whitespace()  # self.pos ++ if current pos points to a whitespace.
         end = self.pos + len(string)
         if end <= self.length and string == self.text[self.pos:end]:
             self.pos += len(string)
             return
         else:
-            raise SexpParseError(f"failed to accept '{string}' in '{ self.text[:self.pos]}*{self.text[self.pos:]}'")
+            raise SexpParseError(f"failed to accept '{string}' in '{self.text[:self.pos]}*{self.text[self.pos:]}'")
 
     def end_of_stream(self):
+        """When the buffer is exhausted, the cursor (self.pos) shall point to the end of string,
+        namely self.pos==self.length."""
         self.skip_whitespace()
 
         if self.pos < self.length:
@@ -322,32 +319,26 @@ class MyBuffer:
     def __str__(self):
         return f"Buffer state--length: {self.length}, pos: {self.pos}, caret: {self.text[self.pos]}"
 
+
 def _is_beginning_control_char(nextC):
     return (
-        nextC.isspace()
-        or nextC == LEFT_PAREN
-        or nextC == RIGHT_PAREN
-        or nextC == DOUBLE_QUOTE
-        or nextC == READER
-        or nextC == META
-        or nextC == NAMED_ARG_PREFIX
+            nextC.isspace()
+            or nextC == LEFT_PAREN
+            or nextC == RIGHT_PAREN
+            or nextC == DOUBLE_QUOTE
+            or nextC == READER
+            or nextC == META
+            or nextC == NAMED_ARG_PREFIX
     )
+
 
 if __name__ == "__main__":
     test_string = r"""
-^Unit
-(^(Boolean) Yield
-  :output ^Boolean
-  (PlaceHasFeature
-    :feature ^PlaceFeature (PlaceFeature.FullBar)
-    :place ^Place
-    (^(Place) singleton
-      :list ^(List Place)
-      (PlaceSearchResponse.results
-        :obj ^PlaceSearchResponse
-        (FindPlaceMultiResults
-          :place ^LocationKeyphrase
-          (LocationKeyphrase.apply :inner ^String "R House"))))))""" #^Unit (^(Date) Yield :output ^Date (Tomorrow))
+(^(Event) refer
+          :constraint ^(Constraint (CalflowIntension Event))
+            (^(Event) extensionConstraint
+            :constraint ^(Constraint Event) (^(Event) EmptyStructConstraint)))
+    """  # ^Unit (^(Date) Yield :output ^Date (Tomorrow))
     parser = SexpParser(test_string)
     node = parser.parse()
     nested_dict = node.to_nested_dict()
