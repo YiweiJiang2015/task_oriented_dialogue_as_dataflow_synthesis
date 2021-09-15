@@ -8,6 +8,7 @@ Functionality:
 
 from enum import Enum
 from typing import Union, List
+import re
 
 LEFT_PAREN = "("
 RIGHT_PAREN = ")"
@@ -29,9 +30,11 @@ BLACK = 'black'
 RED = '#f54260'
 BLUE = 'blue'
 GREEN = 'green'
-PURPLE = 'purple'
+PURPLE = '#a134eb'
 ORANGE = 'orange'
 GOLD = 'gold'
+PINK = 'pink'
+
 
 class NodeTag(Enum):
     TypeHint = GREEN # 0 # ^
@@ -40,7 +43,7 @@ class NodeTag(Enum):
     Op = RED # 3 # &, ?~=, ?=, ~=, >, <
     Call = BLACK # 4 #
     Variable = GOLD # 5
-    Value = BLACK # 6
+    Value = PURPLE # 6
     Misc = BLACK # 100
 
     def __str__(self):
@@ -62,11 +65,17 @@ class Node:
         elif state == 'READER_INIT':
             tag = NodeTag.SugarGet
         elif state == 'VAR_PREFIX_INIT':
-            tag = NodeTag.Variable
+            tag = NodeTag.Variable # if `x0` follows LEFT_PAREN, then this branch won't work.
+        elif state == 'DOUBLE_QUOTE_INIT':
+            tag = NodeTag.Value
         else:
             if not self.head_is_list:
                 if self.node_head in OperatorSet:
                     tag = NodeTag.Op
+                elif self.node_head.startswith(VAR_PREFIX):
+                    tag = NodeTag.Variable
+                elif re.match(r'\d+L', self.node_head):
+                    tag = NodeTag.Value
                 else:
                     tag = NodeTag.Call
             else:
@@ -111,12 +120,12 @@ class Node:
 
     @property
     def head_list_contains_value(self):
-        last_ch = self.node_head[-1][-1]
-        if last_ch in {'L', '"'}.union({str(d) for d in range(10)}): # use reg?
-            flag = True
+        last_span = self.node_head[-1]
+        last_ch = last_span[-1]
+        if last_ch in {'L', '"'}.union({str(d) for d in range(10)}) and not last_span.startswith('x'): # use reg?
+            return True
         else:
-            flag = False
-        return flag
+            return False
 
     @property
     def head_list_contains_op(self):
@@ -195,6 +204,8 @@ class SexpParser:
             state = "NAMED_ARG_PREFIX_INIT"
         elif self.buffer.skip_then_peek() == VAR_PREFIX:
             state = "VAR_PREFIX_INIT"
+        elif self.buffer.skip_then_peek() == DOUBLE_QUOTE:
+            state = "DOUBLE_QUOTE_INIT"
         else:
             pass
 
@@ -204,7 +215,8 @@ class SexpParser:
         node = Node(node_head, state)
         # accept edges
         c = self.buffer.skip_then_peek() # Storing the peeked letter into a variable will make the loop condition cleaner and more efficient.
-        while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX or c == VAR_PREFIX or c == META:
+        while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX \
+                or c == VAR_PREFIX or c == META or c == DOUBLE_QUOTE:
             node.add_edge(self.parse_edge(node))
             if self.buffer.is_eoi():
                 # If a string ends with `#(PlaceFeature "FullBar")` or `??` todo I don't recall any other situations now,
@@ -214,7 +226,7 @@ class SexpParser:
             if state == 'READER_INIT' or state == 'META_INIT' or state == 'NAMED_ARG_PREFIX_INIT':
                 # Operators (i.e., `^`, `#`, `:`) only accept one child
                 break
-                # c = self.buffer.skip_then_peek()
+                # c = self.buffer.peek()
             else:
                 c = self.buffer.skip_then_peek()
         # end of node
@@ -360,12 +372,13 @@ class MyBuffer:
         if self.skip_then_peek() == NAMED_ARG_PREFIX:
             self.accept(NAMED_ARG_PREFIX)
             return NAMED_ARG_PREFIX + self.find_consecutive_span()
+        if self.skip_then_peek() == DOUBLE_QUOTE:
+            return self.find_consecutive_span()
+        if self.skip_then_peek() == VAR_PREFIX:
+            return self.find_consecutive_span()
         while self.skip_then_peek() != RIGHT_PAREN:
-            if self.skip_then_peek() == LEFT_PAREN:
-                break
-            if self.skip_then_peek() == NAMED_ARG_PREFIX:
-                break
-            if self.skip_then_peek() == READER:
+            c = self.skip_then_peek()
+            if c == LEFT_PAREN or c == NAMED_ARG_PREFIX or c == READER or c == DOUBLE_QUOTE or c == VAR_PREFIX:
                 break
             found_span = self.find_consecutive_span()
             if isinstance(found_span, list):
@@ -412,16 +425,22 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-(Yield
-  :output (CreateCommitEventWrapper
-    :event (CreatePreflightEventWrapper
-      :constraint (Constraint[Event]
-        :start (?=
-          (DateAtTimeWithDefaults
-            :date (Execute
-              :intension (refer (extensionConstraint (Constraint[Date]))))
-            :time (NumberPM :number #(Number 6))))
-        :subject (?= #(String "dinner"))))))
+(let
+  (x0
+    (Event.end
+      (Execute
+        (refer
+          (extensionConstraint (^(Event) EmptyStructConstraint))))))
+  (Yield
+    (>
+      (size
+        (QueryEventResponse.results
+          (FindEventWrapperWithDefaults
+            (EventOnDateAfterTime
+              (DateTime.date x0)
+              (^(Event) EmptyStructConstraint)
+              (DateTime.time x0)))))
+      0L)))
     """  # ^Unit (^(Date) Yield :output ^Date (Tomorrow))
     parser = SexpParser(test_string)
 
