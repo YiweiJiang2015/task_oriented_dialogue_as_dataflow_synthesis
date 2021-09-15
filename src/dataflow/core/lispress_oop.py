@@ -1,3 +1,11 @@
+"""
+Author: Yiwei Jiang
+Date: 12/09/2021
+Functionality:
+1. An object-wrapped lispress parser for SMCalFlow
+2. Node.to_nested_dict() is the interface to tree_view.js in repo::smcal-web
+"""
+
 from enum import Enum
 from typing import Union, List
 
@@ -14,16 +22,63 @@ NAMED_ARG_PREFIX = ":"
 # variables will be named `x0`, `x1`, etc., in the order they are introduced.
 VAR_PREFIX = "x"
 
+OperatorSet = {'&', '>', '<', '?=', '~=', '?~='}
 
-class NodeType:
-    pass
+# Html Color Palette
+BLACK = 'black'
+RED = '#f54260'
+BLUE = 'blue'
+GREEN = 'green'
+PURPLE = 'purple'
+ORANGE = 'orange'
+GOLD = 'gold'
+
+class NodeTag(Enum):
+    TypeHint = GREEN # 0 # ^
+    KeyWord = BLUE # 1 # :
+    SugarGet = ORANGE # 2 # #
+    Op = RED # 3 # &, ?~=, ?=, ~=, >, <
+    Call = BLACK # 4 #
+    Variable = GOLD # 5
+    Value = BLACK # 6
+    Misc = BLACK # 100
+
+    def __str__(self):
+        return f'NodeTag: {self.name}'
 
 
 class Node:
-    def __init__(self, node_head: Union[List[str], str]):
+    def __init__(self, node_head: Union[List[str], str], state):
         self.node_head = node_head
         self.edges = []
-        self.type = None
+        self.tag = self.get_tag(state)
+
+    def get_tag(self, state):
+
+        if state == 'META_INIT':
+            tag = NodeTag.TypeHint
+        elif state == 'NAMED_ARG_PREFIX_INIT':
+            tag = NodeTag.KeyWord
+        elif state == 'READER_INIT':
+            tag = NodeTag.SugarGet
+        elif state == 'VAR_PREFIX_INIT':
+            tag = NodeTag.Variable
+        else:
+            if not self.head_is_list:
+                if self.node_head in OperatorSet:
+                    tag = NodeTag.Op
+                else:
+                    tag = NodeTag.Call
+            else:
+                if self.head_list_contains_value:
+                    tag = NodeTag.Value
+                elif self.head_list_contains_op:
+                    tag = NodeTag.Op
+                else:
+                    # todo I cannot differentiate Call from Struct (e.g. ^(Date) EmptyStructConstraint?). So, this might be not precise.
+                    tag = NodeTag.Call
+
+        return tag
 
     def add_edge(self, edge):
         self.edges.append(edge)
@@ -46,12 +101,30 @@ class Node:
             "text": ' '.join(self.node_head) if self.head_is_list else self.node_head,
             'icon': False,
             'state': {'opened': True, 'selected': False},
-            'children': [edge.pop_end_point_to_nested_dict() for edge in self.edges]
+            'children': [edge.pop_end_point_to_nested_dict() for edge in self.edges],
+            'li_attr': {'style': f'color:{self.tag.value}'}
         }
         return nested_dict
 
     def __str__(self):
-        return f'Node_head: {self.node_head}, {self.num_children} children'
+        return f'Node_head: `{self.node_head}`. {self.num_children} children. {self.tag}'
+
+    @property
+    def head_list_contains_value(self):
+        last_ch = self.node_head[-1][-1]
+        if last_ch in {'L', '"'}.union({str(d) for d in range(10)}): # use reg?
+            flag = True
+        else:
+            flag = False
+        return flag
+
+    @property
+    def head_list_contains_op(self):
+        last_span = self.node_head[-1]
+        if last_span in OperatorSet:
+            return True
+        else:
+            return False
 
     @property
     def head_is_list(self):
@@ -79,7 +152,7 @@ class Edge:
         return self.end_point.to_nested_dict()
 
     def __str__(self):
-        return f'Start [{self.start_point}]; End [{self.end_point}]'
+        return f'End [{self.end_point}]; Start [{self.start_point}]'
 
 
 class Visitor:
@@ -128,7 +201,7 @@ class SexpParser:
         if self.buffer.peek() != LEFT_PAREN and self.buffer.peek() != RIGHT_PAREN:
             node_head = self.parse_node_head()
 
-        node = Node(node_head)
+        node = Node(node_head, state)
         # accept edges
         c = self.buffer.skip_then_peek() # Storing the peeked letter into a variable will make the loop condition cleaner and more efficient.
         while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX or c == VAR_PREFIX or c == META:
@@ -251,7 +324,10 @@ class MyBuffer:
             if self.peek() == LEFT_PAREN:
                 meta_span = self.find_meta_span() # see notes below this func
                 expr_span = self.find_consecutive_span() #
-                return [META + meta_span, expr_span]
+                if expr_span != '':
+                    return [META + meta_span, expr_span]
+                else:
+                    return META + meta_span
             else:
                 return META + self.find_meta_span()
         else:
@@ -309,8 +385,10 @@ class MyBuffer:
             raise SexpParseError(f"failed to accept '{string}' in '{self.text[:self.pos]}*{self.text[self.pos:]}'")
 
     def end_of_stream(self):
-        """When the buffer is exhausted, the cursor (self.pos) shall point to the end of string,
-        namely self.pos==self.length."""
+        """
+        When the buffer is exhausted, the cursor (self.pos) shall point to the end of string,
+        namely self.pos==self.length.
+        """
         self.skip_whitespace()
 
         if self.pos < self.length:
@@ -334,12 +412,19 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-(^(Event) refer
-          :constraint ^(Constraint (CalflowIntension Event))
-            (^(Event) extensionConstraint
-            :constraint ^(Constraint Event) (^(Event) EmptyStructConstraint)))
+(Yield
+  :output (CreateCommitEventWrapper
+    :event (CreatePreflightEventWrapper
+      :constraint (Constraint[Event]
+        :start (?=
+          (DateAtTimeWithDefaults
+            :date (Execute
+              :intension (refer (extensionConstraint (Constraint[Date]))))
+            :time (NumberPM :number #(Number 6))))
+        :subject (?= #(String "dinner"))))))
     """  # ^Unit (^(Date) Yield :output ^Date (Tomorrow))
     parser = SexpParser(test_string)
+
     node = parser.parse()
     nested_dict = node.to_nested_dict()
     print()
