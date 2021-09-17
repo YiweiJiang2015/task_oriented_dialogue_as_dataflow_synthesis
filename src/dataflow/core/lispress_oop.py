@@ -216,7 +216,7 @@ class SexpParser:
         # accept edges
         c = self.buffer.skip_then_peek() # Storing the peeked letter into a variable will make the loop condition cleaner and more efficient.
         while c == LEFT_PAREN or c.isnumeric() or c == READER or c == NAMED_ARG_PREFIX \
-                or c == VAR_PREFIX or c == META or c == DOUBLE_QUOTE:
+                or c == VAR_PREFIX or c == META or c == DOUBLE_QUOTE or c != RIGHT_PAREN:
             node.add_edge(self.parse_edge(node))
             if self.buffer.is_eoi():
                 # If a string ends with `#(PlaceFeature "FullBar")` or `??` todo I don't recall any other situations now,
@@ -425,22 +425,11 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-(let
-  (x0
-    (Event.end
-      (Execute
-        (refer
-          (extensionConstraint (^(Event) EmptyStructConstraint))))))
-  (Yield
-    (>
-      (size
-        (QueryEventResponse.results
-          (FindEventWrapperWithDefaults
-            (EventOnDateAfterTime
-              (DateTime.date x0)
-              (^(Event) EmptyStructConstraint)
-              (DateTime.time x0)))))
-      0L)))
+(Yield
+  (IsFree
+    (RecipientAvailability
+      (& (Event.attendees_?))
+      true)))
     """  # ^Unit (^(Date) Yield :output ^Date (Tomorrow))
     parser = SexpParser(test_string)
 
