@@ -74,7 +74,7 @@ class Node:
                     tag = NodeTag.Op
                 elif self.node_head.startswith(VAR_PREFIX):
                     tag = NodeTag.Variable
-                elif re.match(r'\d+L', self.node_head):
+                elif re.match(r'(\d+L)|(true)', self.node_head):
                     tag = NodeTag.Value
                 else:
                     tag = NodeTag.Call
@@ -291,7 +291,7 @@ class MyBuffer:
         Find the text spans after `^`. There are 3 varieties found in current data:
         - Single word: ^(Date), ^Date, ^Recipient
         - Consecutive words: ^(Constraint Event), ^(CalflowIntension Event)
-        - Nested: ^(Constraint (List Attendee), ^(Constraint (CalflowIntension Event)), ^(Constraint (CalflowIntension Recipient)
+        - Nested: ^(Constraint (List Attendee)), ^(Constraint (CalflowIntension Event)), ^((Constraint (List Attendee)) Unit), ^((Constraint ShowAsStatus) Unit)
         """
         meta_span = ""
         meta_state = None  # 0: meta followed by LEFT_PAREN, 1: meta followed directly by letters
@@ -299,7 +299,7 @@ class MyBuffer:
             meta_state = 0
             self.accept(LEFT_PAREN)
             meta_span += self.find_meta_node_head()  # todo I really want to avoid this func
-            while self.peek() == LEFT_PAREN:
+            while self.peek() != RIGHT_PAREN: #== LEFT_PAREN:
                 meta_span += (' ' + self.find_meta_span()) # handles nested meta spans like ^(Constraint (CalflowIntension Event))
             self.accept(RIGHT_PAREN)
         else:
@@ -425,12 +425,41 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-(Yield
-  (IsFree
-    (RecipientAvailability
-      (& (Event.attendees_?))
-      true)))
-    """  # ^Unit (^(Date) Yield :output ^Date (Tomorrow))
+^Unit
+(^((Constraint Event) Unit) do
+  :arg1 ^(Constraint Event)
+  (^(Event) &
+    :c1 ^(Constraint Event)
+    (Event.duration_?
+      :obj ^(Constraint Duration)
+      (^(Duration) ?>
+        :reference ^Duration (toMinutes :minutes ^Number 45)))
+    :c2 ^(Constraint Event)
+    (EventDuringRange
+      :event ^(Constraint Event) (^(Event) EmptyStructConstraint)
+      :range ^(Constraint Date)
+      (NextPeriod :period ^Period (toDays :days ^Number 10))))
+  :arg2 ^Unit
+  (^(Path Unit) do
+    :arg1 ^Path (Path.apply :inner ^String "showAs")
+    :arg2 ^Unit
+    (^((Constraint ShowAsStatus) Unit) do
+      :arg1 ^(Constraint ShowAsStatus)
+      (^(ShowAsStatus) ?=
+        :reference ^ShowAsStatus (ShowAsStatus.Tentative))
+      :arg2 ^Unit
+      (^(Boolean) Yield
+        :output ^Boolean
+        (^(Long) >
+          :x ^Long
+          (^(Event) size
+            :list ^(List Event)
+            (QueryEventResponse.results
+              :obj ^QueryEventResponse
+              (FindEventWrapperWithDefaults
+                :constraint ^(Constraint Event) (^(Event) EmptyStructConstraint))))
+          :y ^Long 0L)))))
+    """  # ^(Constraint (CalflowIntension Event))
     parser = SexpParser(test_string)
 
     node = parser.parse()
