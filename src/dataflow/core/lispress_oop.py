@@ -305,7 +305,7 @@ class MyBuffer:
         else:
             meta_state = 1
             meta_span += self.find_meta_node_head()  # I really want to avoid this func
-        return f"({meta_span})" if meta_state == 0 else meta_span
+        return f"({meta_span.lstrip()})" if meta_state == 0 else meta_span
 
     def find_reader_span(self):
         """ Find the text span after `#` like `(Number 3)` or `(String "meeting with the lecture")` """
