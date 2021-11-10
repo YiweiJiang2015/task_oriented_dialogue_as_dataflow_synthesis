@@ -8,7 +8,13 @@ Functionality:
 
 from enum import Enum
 from typing import Union, List
-import re
+import re, logging
+from collections import Counter
+
+logger = logging.getLogger(__name__)
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+logger.addHandler(ch)
 
 LEFT_PAREN = "("
 RIGHT_PAREN = ")"
@@ -23,10 +29,12 @@ NAMED_ARG_PREFIX = ":"
 # variables will be named `x0`, `x1`, etc., in the order they are introduced.
 VAR_PREFIX = "x"
 
-OperatorSet = {'&', '>', '<', '?=', '~=', '?~='}
+OperatorSet = {'&', '+', '-', '>', '<', '>=', '<=', '~=', '==', '?=', '?~=', '?>', '?<', '?<=', '?>='}
 
 # Html Color Palette
-BLACK = 'black'
+BLACK_0 = 'black'
+BLACK_1 = '#141414'
+BROWN = 'brown'
 RED = '#f54260'
 BLUE = 'blue'
 GREEN = 'green'
@@ -41,59 +49,74 @@ class NodeTag(Enum):
     KeyWord = BLUE # 1 # :
     SugarGet = ORANGE # 2 # #
     Op = RED # 3 # &, ?~=, ?=, ~=, >, <
-    Call = BLACK # 4 #
+    Call = BLACK_0 # 4 #
     Variable = GOLD # 5
     Value = PURPLE # 6
-    Misc = BLACK # 100
+    Constraint = BROWN
+    Misc = BLACK_1 # 100
 
     def __str__(self):
         return f'NodeTag: {self.name}'
+
+    @classmethod
+    def selected_name_iterator(cls):
+        return [name for name in cls.__members__.keys() ] # if name not in ['Value']
+
+    @classmethod
+    def create_counter_by_name(cls):
+        return {name: Counter() for name in cls.selected_name_iterator()}
 
 
 class Node:
     def __init__(self, node_head: Union[List[str], str], state):
         self.node_head = node_head
+        self.state = state
         self.edges = []
-        self.tag = self.get_tag(state)
+        self.tag = None # self.get_tag(state)
 
-    def get_tag(self, state):
+    def set_tag(self):
 
-        if state == 'META_INIT':
-            tag = NodeTag.TypeHint
-        elif state == 'NAMED_ARG_PREFIX_INIT':
-            tag = NodeTag.KeyWord
-        elif state == 'READER_INIT':
-            tag = NodeTag.SugarGet
-        elif state == 'VAR_PREFIX_INIT':
-            tag = NodeTag.Variable # if `x0` follows LEFT_PAREN, then this branch won't work.
-        elif state == 'DOUBLE_QUOTE_INIT':
-            tag = NodeTag.Value
+        if self.state == 'META_INIT':
+            self.tag = NodeTag.TypeHint
+        elif self.state == 'NAMED_ARG_PREFIX_INIT':
+            self.tag = NodeTag.KeyWord
+        elif self.state == 'READER_INIT':
+            self.tag = NodeTag.SugarGet
+        elif self.state == 'VAR_PREFIX_INIT':
+            self.tag = NodeTag.Variable # if `x0` follows LEFT_PAREN, then this branch won't work.
+        elif self.state == 'DOUBLE_QUOTE_INIT':
+            self.tag = NodeTag.Value
         else:
             if not self.head_is_list:
                 if self.node_head in OperatorSet:
-                    tag = NodeTag.Op
+                    self.tag = NodeTag.Op
                 elif self.node_head.startswith(VAR_PREFIX):
-                    tag = NodeTag.Variable
-                elif re.match(r'(\d+L)|(true)', self.node_head):
-                    tag = NodeTag.Value
+                    self.tag = NodeTag.Variable
+                elif self.node_head.startswith(':'):
+                    self.tag = NodeTag.KeyWord
+                elif 'Constraint' in self.node_head:
+                    self.tag = NodeTag.Constraint
+                elif len(self.edges) == 0 or re.match(r'(\d+L)|(true)', self.node_head):
+                    self.tag = NodeTag.Value
                 else:
-                    tag = NodeTag.Call
+                    self.tag = NodeTag.Call
             else:
                 if self.head_list_contains_value:
-                    tag = NodeTag.Value
+                    self.tag = NodeTag.Value
                 elif self.head_list_contains_op:
-                    tag = NodeTag.Op
+                    self.tag = NodeTag.Op
+
                 else:
                     # todo I cannot differentiate Call from Struct (e.g. ^(Date) EmptyStructConstraint?). So, this might be not precise.
-                    tag = NodeTag.Call
+                    self.tag = NodeTag.Call
 
-        return tag
+        # return tag
 
     def add_edge(self, edge):
         self.edges.append(edge)
 
-    def parse_lispress_string(self, lisp_string: str):
-        return
+    # def parse_lispress_string(self, lisp_string: str):
+    #     return
 
     def walk(self, visitor):
         visitor.node(self)
@@ -120,9 +143,17 @@ class Node:
 
     @property
     def head_list_contains_value(self):
+        # todo normally, a node head constituted by a list is a sugar expression, right?
+        # todo can we find any exception?
+        # also if the len(node_head) is larger than 3. There may be something wrong...
+        # "'HourMinuteMilitary', '11L', '0L'" is an legitimate example of 3 elements
+        if len(self.node_head) > 3:
+            logger.warning(f'The node {self.node_head} has a list head with {len(self.node_head)} elements.')
         last_span = self.node_head[-1]
         last_ch = last_span[-1]
-        if last_ch in {'L', '"'}.union({str(d) for d in range(10)}) and not last_span.startswith('x'): # use reg?
+        condition_a = last_ch in {'L', '"', ']'}.union({str(d) for d in range(10)}) and not last_span.startswith('x')
+        condition_b = last_span.lower() == 'true' or last_span.lower() == 'false'
+        if condition_a or condition_b: # use reg?
             return True
         else:
             return False
@@ -173,8 +204,8 @@ class Visitor:
     def edge(self, edge):
         return
 
-    def span(self, span):
-        return
+    # def span(self, span):
+    #     return
 
 
 class SexpParser:
@@ -232,6 +263,7 @@ class SexpParser:
         # end of node
         if state == "PAREN_INIT":
             self.buffer.accept(RIGHT_PAREN)
+        node.set_tag()
         return node
 
     def parse_edge(self, edge_start_point):
@@ -425,40 +457,7 @@ def _is_beginning_control_char(nextC):
 
 if __name__ == "__main__":
     test_string = r"""
-^Unit
-(^((Constraint Event) Unit) do
-  :arg1 ^(Constraint Event)
-  (^(Event) &
-    :c1 ^(Constraint Event)
-    (Event.duration_?
-      :obj ^(Constraint Duration)
-      (^(Duration) ?>
-        :reference ^Duration (toMinutes :minutes ^Number 45)))
-    :c2 ^(Constraint Event)
-    (EventDuringRange
-      :event ^(Constraint Event) (^(Event) EmptyStructConstraint)
-      :range ^(Constraint Date)
-      (NextPeriod :period ^Period (toDays :days ^Number 10))))
-  :arg2 ^Unit
-  (^(Path Unit) do
-    :arg1 ^Path (Path.apply :inner ^String "showAs")
-    :arg2 ^Unit
-    (^((Constraint ShowAsStatus) Unit) do
-      :arg1 ^(Constraint ShowAsStatus)
-      (^(ShowAsStatus) ?=
-        :reference ^ShowAsStatus (ShowAsStatus.Tentative))
-      :arg2 ^Unit
-      (^(Boolean) Yield
-        :output ^Boolean
-        (^(Long) >
-          :x ^Long
-          (^(Event) size
-            :list ^(List Event)
-            (QueryEventResponse.results
-              :obj ^QueryEventResponse
-              (FindEventWrapperWithDefaults
-                :constraint ^(Constraint Event) (^(Event) EmptyStructConstraint))))
-          :y ^Long 0L)))))
+(Yield :output (:start (FindNumNextEvent :constraint (Constraint[Event] :subject (?~= #(String "staff meeting"))) :number #(Number 1))))
     """  # ^(Constraint (CalflowIntension Event))
     parser = SexpParser(test_string)
 
